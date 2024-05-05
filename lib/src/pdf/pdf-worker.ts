@@ -3,6 +3,7 @@ import { loadPdfJs } from 'obsidian'
 onmessage = async evt => {
   await loadPdfJs();
   try {
+    console.log("RW - Worker xtracting text from " + evt.data.name)
     // @ts-ignore
     const pdf = await window.pdfjsLib.getDocument(evt.data.data).promise;
 
