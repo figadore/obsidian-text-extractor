@@ -91,10 +91,17 @@ The plugin is split in two parts:
 Each project is in its own folder, and has its own `package.json` and `node_modules`. The library uses Rollup (easier to setup with Wasm and web workers), while the plugin uses esbuild.
 
 ```
+obsidian_vault_path=<path_to_your_obsidian_vault>
+plugin_path="${obsidian_vault_path}/.obsidian/plugins/text-extractor"
+
 cd lib
 pnpm install
 pnpm run build
 cd ../plugin
 pnpm install
 pnpm run build
+cd ..
+mkdir -p $plugin_path
+cp manifest.json $plugin_path
+cp plugin/dist/* $plugin_path
 ```
