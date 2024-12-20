@@ -1,54 +1,10 @@
-import { Platform, TFile } from 'obsidian'
-import WebWorker from 'web-worker:./pdf-worker.ts'
+import { Platform, TFile, loadPdfJs } from 'obsidian'
 import {
   CANT_EXTRACT_ON_MOBILE,
   FAILED_TO_EXTRACT,
   pdfProcessQueue,
-  workerTimeout,
 } from '../globals'
 import { getCachePath, readCache, writeCache } from '../cache'
-
-class PDFWorker {
-  static #pool: PDFWorker[] = []
-  #running = false
-
-  private constructor(private worker: Worker) {}
-
-  static getWorker(): PDFWorker {
-    const free = PDFWorker.#pool.find(w => !w.#running)
-    if (free) {
-      return free
-    }
-    // Spawn a new worker
-    const worker = new PDFWorker(new WebWorker({ name: 'PDF Text Extractor' }))
-    PDFWorker.#pool.push(worker)
-    return worker
-  }
-
-  static #destroyWorker(pdfWorker: PDFWorker) {
-    pdfWorker.worker.terminate()
-    PDFWorker.#pool = PDFWorker.#pool.filter(w => w !== pdfWorker)
-  }
-
-  public async run(msg: { data: Uint8Array; name: string }): Promise<any> {
-    return new Promise((resolve, reject) => {
-      this.#running = true
-
-      const timeout = setTimeout(() => {
-        console.warn('Text Extractor - PDF Worker timeout for ', msg.name)
-        reject('timeout')
-        PDFWorker.#destroyWorker(this)
-      }, workerTimeout)
-
-      this.worker.postMessage(msg)
-      this.worker.onmessage = evt => {
-        clearTimeout(timeout)
-        resolve(evt)
-        this.#running = false
-      }
-    })
-  }
-}
 
 class PDFManager {
   public async getPdfText(file: TFile): Promise<string> {
@@ -77,28 +33,35 @@ class PDFManager {
     // The PDF is not cached, extract it
     const cachePath = getCachePath(file)
     const data = new Uint8Array(await app.vault.readBinary(file))
-    const worker = PDFWorker.getWorker()
 
-    return new Promise(async (resolve, reject) => {
-      try {
-        const res = await worker.run({ data, name: file.basename })
-        const text = (res.data.text as string)
-          // Replace \n with spaces
-          .replace(/\n/g, ' ')
-          // Trim multiple spaces
-          .replace(/ +/g, ' ')
-          .trim()
+    // Load the PDF.js library
+    const pdfjs = await loadPdfJs()
+    const loadingTask = pdfjs.getDocument({ data })
+    const pdf = await loadingTask.promise
+    const pagePromises = [];
+    // Get text from each page of the PDF
+    for (let j = 1; j <= pdf.numPages; j++) {
+      const page = pdf.getPage(j);
 
-        // Add it to the cache
-        await writeCache(cachePath.folder, cachePath.filename, text, file.path, '')
-        resolve(text)
-      } catch (e) {
-        // In case of error (unreadable PDF or timeout) just add
-        // an empty string to the cache
-        await writeCache(cachePath.folder, cachePath.filename, '', file.path, '')
-        resolve('')
-      }
-    })
+      // @ts-ignore
+      pagePromises.push(page.then((page) => {
+        // @ts-ignore
+        const textContentPromise: Promise<{ items }> = page.getTextContent();
+        return textContentPromise.then((text) => {
+          // @ts-ignore
+          return text.items.map((s) => s).join('');
+        });
+      }));
+    }
+
+    const texts = await Promise.all(pagePromises);
+
+    // Add it to the cache
+    const text = texts.join(' ');
+    await writeCache(cachePath.folder, cachePath.filename, text, file.path, '')
+
+    return text
+
   }
 }
 
