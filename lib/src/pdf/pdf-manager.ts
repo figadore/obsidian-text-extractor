@@ -47,9 +47,13 @@ class PDFManager {
       pagePromises.push(page.then((page) => {
         // @ts-ignore
         const textContentPromise: Promise<{ items }> = page.getTextContent();
-        return textContentPromise.then((text) => {
-          // @ts-ignore
-          return text.items.map((s) => s).join('');
+        return textContentPromise.then((t) => {
+          const items = t.items;
+          let text = '';
+          for (let i = 0; i < items.length; i++) {
+            text += items[i].str + ' ';
+          }
+          return text;
         });
       }));
     }
